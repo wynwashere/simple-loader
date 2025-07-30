@@ -32,9 +32,41 @@ func main() {
 		return
 	}
 
+	targetFile := os.Args[1]
+	printBanner(targetFile)
+
 	for {
-		runOnce(os.Args[1])
+		runOnce(targetFile)
 	}
+}
+
+func printBanner(filename string) {
+	targetCount := countLines(filename)
+	fmt.Println("======================================")
+	fmt.Println("     Simple Telnet Loader (Go)        ")
+	fmt.Println("======================================")
+	fmt.Printf("File       : %s\n", filename)
+	fmt.Printf("Loaded     : %d targets\n", targetCount)
+	fmt.Printf("Start Time : %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Println("======================================\n")
+}
+
+func countLines(filename string) int {
+	file, err := os.Open(filename)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !strings.HasPrefix(line, "#") {
+			count++
+		}
+	}
+	return count
 }
 
 func runOnce(filename string) {
